@@ -1,0 +1,108 @@
+# command_policy.yaml
+# Command approval rules for EmployedEngineer
+
+# Extraction patterns - try in order until match
+extract_patterns:
+  - pattern: '`([^`]+)`'
+    description: "Backtick-wrapped command"
+  - pattern: '"(.*?)"'
+    description: "Double-quoted command"
+  - pattern: 'Run "(.*?)"\? \[y/N\]'
+    description: "Claude Code style prompt"
+  - pattern: 'Do you want to run (.*?)\? \(y/N\)'
+    description: "Alternative prompt style"
+  - pattern: '(?:wants to run|about to run|run command|command):\s*(.+)$'
+    description: "Narrative style"
+  - pattern: '^\s*(?:\$ )?(\./\S+|pnpm|npm|yarn|bun|pytest|python|go|cargo|make|git)\b(.*)$'
+    description: "Shell command line"
+
+# Classification rules - evaluated in order
+classification:
+
+  # AUTO-APPROVE: wrapper commands for safe tasks
+  auto_approve:
+    patterns:
+      - '^\.\/acceptance\/run_allowed\.sh\s+(smoke|test|lint|typecheck|format)$'
+    action: 'submit "y"'
+    log: "AUTO-APPROVED: wrapper task"
+
+  # APPROVE-WITH-CHECK: wrapper commands that need verification
+  approve_with_check:
+    patterns:
+      - '^\.\/acceptance\/run_allowed\.sh\s+(e2e|integration|build)$'
+    action: 'submit "y" if task requires this step, else "n"'
+    log: "CONDITIONAL: check if needed for current task"
+
+  # DENY: non-wrapper commands (must use wrapper)
+  deny_non_wrapper:
+    patterns:
+      - '^(pnpm|npm|yarn|bun)\s+(test|run|exec)'
+      - '^pytest'
+      - '^python\s+-m\s+(pytest|unittest)'
+      - '^go\s+test'
+      - '^cargo\s+test'
+      - '^make\s+(test|check)'
+    action: 'submit "n"'
+    response: "請改用 ./acceptance/run_allowed.sh <task>"
+    log: "DENIED: non-wrapper command"
+
+  # DENY: high-risk commands (denylist)
+  deny_high_risk:
+    patterns:
+      - 'rm\s+-rf'
+      - 'sudo\s+'
+      - 'curl\s+.*\|\s*(ba)?sh'
+      - 'wget\s+.*\|\s*(ba)?sh'
+      - '>\s*/dev/'
+      - 'chmod\s+777'
+      - 'chown\s+-R'
+      - ':(){.*};:'  # fork bomb
+    action: 'submit "n"'
+    response: "❌ 高風險命令被拒絕"
+    log: "DENIED: high-risk pattern"
+
+  # DENY: sensitive paths
+  deny_sensitive:
+    patterns:
+      - '~/.ssh'
+      - '\.env'
+      - 'keychain'
+      - '/etc/passwd'
+      - '/etc/shadow'
+      - 'AWS_SECRET'
+      - 'GITHUB_TOKEN'
+      - 'PRIVATE_KEY'
+    action: 'submit "n"'
+    response: "❌ 敏感路徑/憑證被拒絕"
+    log: "DENIED: sensitive path/credential"
+
+  # ESCALATE: deployment and irreversible actions
+  escalate:
+    patterns:
+      - 'git\s+push'
+      - 'kubectl\s+(apply|delete|create)'
+      - 'docker\s+push'
+      - 'terraform\s+(apply|destroy)'
+      - 'aws\s+.*--no-dry-run'
+      - 'gcloud\s+.*deploy'
+      - 'npm\s+publish'
+      - 'cargo\s+publish'
+    action: 'STOP and ask supervisor'
+    response: |
+      ⚠️ 需要主管批准的操作
+      - 命令: {command}
+      - 目的: {purpose}
+      - 風險: {risk}
+      - 替代方案: {alternative}
+    log: "ESCALATED: requires supervisor approval"
+
+# Default action for unmatched commands
+default:
+  action: 'submit "n"'
+  response: "未知命令，請使用 ./acceptance/run_allowed.sh"
+  log: "DENIED: unknown command (default)"
+
+# Fail limits
+circuit_breaker:
+  max_consecutive_failures: 3
+  action: "ESCALATE to supervisor with full context"

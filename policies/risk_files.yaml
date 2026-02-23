@@ -1,0 +1,72 @@
+# risk_files.yaml
+# File patterns that require extra scrutiny or escalation
+
+# Files that should NEVER be modified without explicit approval
+protected:
+  - pattern: '.env*'
+    reason: "Environment secrets"
+    action: ESCALATE
+  
+  - pattern: '*.pem'
+    reason: "Private keys"
+    action: DENY
+  
+  - pattern: '*.key'
+    reason: "Private keys"
+    action: DENY
+  
+  - pattern: 'id_rsa*'
+    reason: "SSH keys"
+    action: DENY
+  
+  - pattern: '.ssh/*'
+    reason: "SSH configuration"
+    action: DENY
+  
+  - pattern: '*secret*'
+    reason: "Potential secrets"
+    action: ESCALATE
+  
+  - pattern: '*credential*'
+    reason: "Potential credentials"
+    action: ESCALATE
+
+# Files that need verification after modification
+verify_on_change:
+  - pattern: 'package.json'
+    reason: "Dependencies changed"
+    verify: "./acceptance/run_allowed.sh smoke"
+  
+  - pattern: 'package-lock.json'
+    reason: "Lock file changed"
+    verify: "./acceptance/run_allowed.sh smoke"
+  
+  - pattern: 'tsconfig.json'
+    reason: "TypeScript config changed"
+    verify: "./acceptance/run_allowed.sh typecheck"
+  
+  - pattern: 'Dockerfile'
+    reason: "Container config changed"
+    verify: "./acceptance/run_allowed.sh build"
+  
+  - pattern: '.github/workflows/*'
+    reason: "CI/CD changed"
+    action: ESCALATE
+
+# Files we should NOT read (evidence ladder constraint)
+no_full_read:
+  - pattern: 'node_modules/**'
+    reason: "External dependencies"
+  
+  - pattern: 'dist/**'
+    reason: "Build artifacts"
+  
+  - pattern: '*.min.js'
+    reason: "Minified code"
+  
+  - pattern: '*.bundle.js'
+    reason: "Bundled code"
+
+# Large file warning threshold (bytes)
+large_file_threshold: 50000
+large_file_action: "Read only targeted excerpts, cite line numbers"

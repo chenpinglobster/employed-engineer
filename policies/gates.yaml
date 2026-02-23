@@ -1,0 +1,85 @@
+# gates.yaml
+# State transition gates for EmployedEngineer
+
+transitions:
+
+  init_to_plan:
+    from: INIT
+    to: PLAN
+    requires:
+      - acceptance/run_allowed.sh exists and executable
+      - acceptance/smoke.sh exists
+      - "./acceptance/run_allowed.sh smoke" exits 0
+    artifacts:
+      - acceptance/artifacts/latest/report.json (can be minimal)
+
+  plan_to_implement:
+    from: PLAN
+    to: IMPLEMENT
+    requires:
+      - Task package defined with:
+        - clear_objective: string
+        - acceptance_criteria: list
+        - slice_scope: string (what's in/out)
+        - estimated_complexity: low|medium|high
+
+  implement_to_verify:
+    from: IMPLEMENT
+    to: VERIFY
+    requires:
+      - Claude Code session idle or completed
+      - No pending command approval prompts
+    triggers:
+      - Run: "./acceptance/run_allowed.sh test"
+
+  verify_to_accept:
+    from: VERIFY
+    to: ACCEPT
+    requires:
+      - acceptance/artifacts/latest/report.json exists
+      - report.json has required fields (see schema)
+    artifacts:
+      - report.json
+      - diffstat.txt
+      - test_summary.txt
+
+  accept_pass:
+    from: ACCEPT
+    to: DONE
+    requires:
+      - All acceptance criteria met
+      - Evidence at Level 0 (artifacts only)
+      - No critical failures in report
+
+  accept_fail:
+    from: ACCEPT
+    to: PATCH
+    requires:
+      - At least one criterion failed
+      - fail_count < max_failures
+    provides:
+      - Minimal evidence of failure
+      - Specific fix request
+
+  patch_to_implement:
+    from: PATCH
+    to: IMPLEMENT
+    requires:
+      - Fix request prepared
+      - Previous failure documented
+    increments:
+      - fail_count
+
+  any_to_escalate:
+    from: "*"
+    to: ESCALATE
+    triggers:
+      - fail_count >= 3
+      - High-risk command detected
+      - Claude Code requests clarification
+      - Ambiguous requirements
+    provides:
+      - Summary of attempts
+      - Evidence collected
+      - Risk assessment
+      - Recommended actions

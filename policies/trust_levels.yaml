@@ -1,0 +1,69 @@
+# Trust Levels for Command Approval
+# Higher trust = fewer interruptions, more automation
+
+levels:
+  full_control:
+    name: "Full Control"
+    description: "Approve every command and file operation"
+    auto_approve: []
+    suitable_for:
+      - "Production systems"
+      - "First-time projects"
+      - "High-stakes changes"
+    
+  balanced:
+    name: "Balanced"
+    description: "Auto-approve wrapper + file ops, ask for risky commands"
+    auto_approve:
+      - pattern: "./acceptance/run_allowed.sh (smoke|test|typecheck|lint|format)"
+        after_first: true
+      - pattern: "Create file src/**/*.ts"
+        condition: "session_allows_all_edits"
+      - pattern: "Create file src/**/*.tsx"
+        condition: "session_allows_all_edits"
+      - pattern: "Edit file src/**/*.ts"
+        condition: "session_allows_all_edits"
+    escalate:
+      - pattern: "git push"
+      - pattern: "npm publish"
+      - pattern: ".*deploy.*"
+      - pattern: "kubectl apply"
+    suitable_for:
+      - "Development iterations"
+      - "Feature implementation"
+      - "Refactoring with tests"
+    
+  trust_mode:
+    name: "Trust Mode"
+    description: "Only escalate on high-risk commands"
+    auto_approve:
+      - pattern: "./acceptance/run_allowed.sh .*"
+      - pattern: "Create file .*"
+      - pattern: "Edit file .*"
+      - pattern: "git commit -m .*"
+      - pattern: "git add .*"
+    escalate:
+      - pattern: "git push"
+      - pattern: "rm -rf"
+      - pattern: "sudo .*"
+      - pattern: ".*deploy.*"
+      - pattern: "npm publish"
+      - pattern: "docker push"
+    suitable_for:
+      - "Trusted collaborators"
+      - "Internal tools"
+      - "Rapid prototyping"
+      - "Well-tested projects"
+
+# Default trust level
+default: balanced
+
+# Trust level selection prompt
+prompt: |
+  Choose supervision level for this session:
+  
+  1. Full Control - approve every command/file (safest, slowest)
+  2. Balanced - auto-approve wrapper + file ops (recommended)
+  3. Trust Mode - only escalate on high-risk (fastest, requires trust)
+  
+  [Press Enter for default: Balanced]

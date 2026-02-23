@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EmployedEngineer Report",
+  "description": "Structured report produced by Claude Code after each implementation round",
+  "type": "object",
+  "required": ["version", "timestamp", "task", "status", "tests", "files_changed"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "task": {
+      "type": "object",
+      "required": ["id", "description"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Task identifier (e.g., slice-1, fix-auth-bug)"
+        },
+        "description": {
+          "type": "string",
+          "description": "Brief description of what was implemented"
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["criterion", "met"],
+            "properties": {
+              "criterion": { "type": "string" },
+              "met": { "type": "boolean" },
+              "evidence": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pass", "fail", "partial", "blocked"]
+    },
+    "tests": {
+      "type": "object",
+      "required": ["total", "passed", "failed", "skipped"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "error": { "type": "string" },
+              "file": { "type": "string" },
+              "line": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    "files_changed": {
+      "type": "object",
+      "required": ["added", "modified", "deleted"],
+      "properties": {
+        "added": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "modified": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "deleted": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "total_lines_added": { "type": "integer" },
+        "total_lines_removed": { "type": "integer" }
+      }
+    },
+    "commands_executed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command", "exit_code"],
+        "properties": {
+          "command": { "type": "string" },
+          "exit_code": { "type": "integer" },
+          "duration_ms": { "type": "integer" },
+          "stdout_tail": { "type": "string" },
+          "stderr_tail": { "type": "string" }
+        }
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": { "type": "string" },
+          "severity": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "critical"]
+          },
+          "suggested_action": { "type": "string" }
+        }
+      }
+    },
+    "notes": {
+      "type": "string",
+      "description": "Free-form notes from Claude Code"
+    }
+  }
+}
