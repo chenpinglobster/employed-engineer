@@ -2,60 +2,52 @@
 
 Detailed reference for the monitor sub-agent's execution loop.
 
-## Prerequisites
+## No Setup Required
 
-Configure Claude Code hooks in `~/.claude/settings.json`:
-```json
-{
-  "hooks": {
-    "Stop": [{"matcher": "*", "hooks": [{"type": "command", "command": "touch .claude_signal"}]}],
-    "PermissionRequest": [{"matcher": "*", "hooks": [{"type": "command", "command": "touch .claude_signal"}]}]
-  }
-}
-```
+`run_claude.sh` handles logging and thinking loop detection automatically.
+No Claude Code hooks or special configuration needed.
 
 ## Monitor Protocol Steps
 
 ```
 0. Verify: `which claude` exits 0. If not → announce ESCALATE "claude CLI not found"
 
-1. cd PROJECT.path && rm -f .claude_signal
+1. cd PROJECT.path
 
-2. Launch Claude Code with automatic log capture:
+2. Launch Claude Code with automatic log capture + watchdog:
    exec pty:true background:true timeout:1800
    command:"<SKILL_DIR>/run_claude.sh <PROJECT_DIR> '<TASK>. Use ./acceptance/run_allowed.sh'"
    → sessionId
    
-   run_claude.sh wraps Claude Code with `script` to capture ALL terminal output
-   to a timestamped log file. No manual log saving needed.
+   run_claude.sh handles:
+   - Full PTY capture via `script` command
+   - Thinking loop watchdog (kills after 5 min silence)
 
-3. Semaphore wait loop — repeat until process exits (max 200 iterations):
+3. Poll loop — repeat until process exits (max 200 iterations):
 
-   a. Sleep: process action:poll sessionId:<id> timeout:3000
-      (Yields up to 3s, wakes early on output.)
+   a. Poll for output (yields up to 3s, wakes early on new output):
+      process action:poll sessionId:<id> timeout:3000
 
-   b. Signal check:
-      exec command:"[ -f .claude_signal ] && echo SIGNAL || echo waiting"
-      exec command:"rm -f .claude_signal"
-
-   c. Log check (on SIGNAL or every 10 iterations):
+   b. Read last lines and check for approval prompt:
       process action:log sessionId:<id> limit:30
+      
+      Look for patterns like:
+      - "Allow?" / "allow this" / "Do you want to" / "permission" / "[y/N]"
+      - File edit confirmations
+      - Command execution requests
+      
+      Response:
       - autoApprove match → process action:submit data:"y\n"
       - deny match → process action:submit data:"n\n"
       - escalate match → STOP, announce ESCALATE
       - unknown prompt → process action:submit data:"n\n" (default deny)
 
-   d. Thinking loop detection:
-      Track last_output_change. If no new output for 5 minutes (100 iterations):
-      → process action:submit data:"\x03" (Ctrl+C to interrupt)
-      → announce TIMEOUT with "thinking loop detected"
+   c. Process alive check: if process exited → break loop
 
-   e. Process alive check: if process exited → break loop
-
-   f. Circuit breaker: fail_count >= 3 → announce ESCALATE
+   d. Circuit breaker: fail_count >= 3 → announce ESCALATE
 
 4. Full log is automatic (run_claude.sh handles it).
-   Confirm log file exists in acceptance/artifacts/latest/claude_*.log
+   Find it: ls -t acceptance/artifacts/latest/claude_*.log | head -1
    Include path in announce message.
 
 5. Verify: acceptance/artifacts/latest/report.json exists
@@ -65,12 +57,12 @@ Configure Claude Code hooks in `~/.claude/settings.json`:
 
 ## Timeouts
 
-| Component | Duration | Notes |
-|-----------|----------|-------|
+| Component | Duration | Handled By |
+|-----------|----------|------------|
+| Thinking loop | 300s (5 min) | `run_claude.sh` watchdog (auto-kill) |
 | Claude Code | 1800s (30 min) | PTY timeout |
-| Sub-agent | 2400s (40 min) | Includes buffer |
-| Semaphore check | 3s interval | 200 iterations max |
-| Thinking loop | 300s (5 min) | No new output → Ctrl+C |
+| Sub-agent | 2400s (40 min) | runTimeoutSeconds |
+| Poll interval | 3s | Monitor loop |
 
 ## Command Approval Quick Reference
 

@@ -6,6 +6,7 @@ metadata:
     emoji: "👷"
     requires:
       anyBins: ["claude"]
+    setup: none
 ---
 
 # EmployedEngineer
