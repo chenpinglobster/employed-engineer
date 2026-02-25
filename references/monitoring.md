@@ -21,18 +21,15 @@ Configure Claude Code hooks in `~/.claude/settings.json`:
 
 1. cd PROJECT.path && rm -f .claude_signal
 
-2. Launch Claude Code with automatic log capture:
+2. Launch Claude Code:
    exec pty:true background:true timeout:1800
    command:"<SKILL_DIR>/run_claude.sh <PROJECT_DIR> '<TASK>. Use ./acceptance/run_allowed.sh'"
    → sessionId
-   
-   run_claude.sh wraps Claude Code with `script` to capture ALL terminal output
-   to a timestamped log file. No manual log saving needed.
 
 3. Semaphore wait loop — repeat until process exits (max 200 iterations):
+   Track last_log_hash (to detect new output) and stale_count (for thinking loop).
 
    a. Sleep: process action:poll sessionId:<id> timeout:3000
-      (Yields up to 3s, wakes early on output.)
 
    b. Signal check:
       exec command:"[ -f .claude_signal ] && echo SIGNAL || echo waiting"
@@ -46,17 +43,22 @@ Configure Claude Code hooks in `~/.claude/settings.json`:
       - unknown prompt → process action:submit data:"n\n" (default deny)
 
    d. Thinking loop detection:
-      Track last_output_change. If no new output for 5 minutes (100 iterations):
-      → process action:submit data:"\x03" (Ctrl+C to interrupt)
-      → announce TIMEOUT with "thinking loop detected"
+      Compare log output to last_log_hash.
+      If same → stale_count += 1
+      If different → stale_count = 0, update last_log_hash
+      If stale_count >= 100 (= ~5 min at 3s intervals):
+      → announce TIMEOUT "thinking loop detected — no output for 5 min"
 
    e. Process alive check: if process exited → break loop
 
    f. Circuit breaker: fail_count >= 3 → announce ESCALATE
 
-4. Full log is automatic (run_claude.sh handles it).
-   Confirm log file exists in acceptance/artifacts/latest/claude_*.log
-   Include path in announce message.
+4. Save full log:
+   process action:log sessionId:<sessionId> offset:0 limit:99999
+   Write to: acceptance/artifacts/latest/claude_YYYYMMDD_HHMMSS.log
+   
+   Use exec to write the log content to the timestamped file.
+   This is a MONITORING action — allowed under monitor constraint.
 
 5. Verify: acceptance/artifacts/latest/report.json exists
 
@@ -65,12 +67,12 @@ Configure Claude Code hooks in `~/.claude/settings.json`:
 
 ## Timeouts
 
-| Component | Duration | Notes |
-|-----------|----------|-------|
+| Component | Duration | Handled By |
+|-----------|----------|------------|
+| Thinking loop | ~300s (5 min) | Monitor stale_count ≥ 100 |
 | Claude Code | 1800s (30 min) | PTY timeout |
-| Sub-agent | 2400s (40 min) | Includes buffer |
-| Semaphore check | 3s interval | 200 iterations max |
-| Thinking loop | 300s (5 min) | No new output → Ctrl+C |
+| Sub-agent | 2400s (40 min) | runTimeoutSeconds |
+| Semaphore check | 3s interval | Monitor poll loop |
 
 ## Command Approval Quick Reference
 
