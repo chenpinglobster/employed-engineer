@@ -1,43 +1,87 @@
 #!/usr/bin/env bash
-# run_claude.sh — Launch Claude Code with automatic full terminal logging
-# Usage: ./run_claude.sh <project_dir> "<prompt>"
+# run_claude.sh — Launch Claude Code with automatic logging + thinking loop watchdog
+# Usage: ./run_claude.sh <project_dir> "<prompt>" [timeout_seconds]
 #
-# Automatically captures complete PTY output to a timestamped log file.
-# Monitor does NOT need to manually save logs — this script handles it.
+# Features:
+#   - Full PTY capture via `script` command
+#   - Watchdog: kills Claude Code if no output for THINKING_TIMEOUT seconds
+#   - Timestamped log file in acceptance/artifacts/latest/
 
 set -euo pipefail
 
-PROJECT_DIR="${1:?Usage: run_claude.sh <project_dir> \"<prompt>\"}"
-PROMPT="${2:?Usage: run_claude.sh <project_dir> \"<prompt>\"}"
+PROJECT_DIR="${1:?Usage: run_claude.sh <project_dir> \"<prompt>\" [timeout_seconds]}"
+PROMPT="${2:?Usage: run_claude.sh <project_dir> \"<prompt>\" [timeout_seconds]}"
+THINKING_TIMEOUT="${3:-300}"  # Default 5 minutes
 
-# Ensure artifacts directory exists
+# Setup
 ARTIFACTS_DIR="${PROJECT_DIR}/acceptance/artifacts/latest"
 mkdir -p "$ARTIFACTS_DIR"
-
-# Timestamped log file
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 LOG_FILE="${ARTIFACTS_DIR}/claude_${TIMESTAMP}.log"
 
-echo "=== Claude Code Session ===" > "$LOG_FILE"
-echo "Started: $(date -Iseconds)" >> "$LOG_FILE"
-echo "Project: ${PROJECT_DIR}" >> "$LOG_FILE"
-echo "Log: ${LOG_FILE}" >> "$LOG_FILE"
-echo "===========================" >> "$LOG_FILE"
-echo "" >> "$LOG_FILE"
-
 cd "$PROJECT_DIR"
 
-# Use `script` to capture all PTY output (works on macOS and Linux)
-if [[ "$(uname)" == "Darwin" ]]; then
-  # macOS: script -q <logfile> <command> <args...>
-  script -q "$LOG_FILE" claude "$PROMPT"
-else
-  # Linux: script -q -c "<command>" <logfile>
-  script -q -c "claude \"$PROMPT\"" "$LOG_FILE"
-fi
+echo "📄 Log: ${LOG_FILE}"
+echo "⏱️  Thinking timeout: ${THINKING_TIMEOUT}s"
 
-echo "" >> "$LOG_FILE"
-echo "=== Session ended: $(date -Iseconds) ===" >> "$LOG_FILE"
+# Watchdog: monitor log file for staleness, kill claude if stuck
+watchdog() {
+  local pid="$1"
+  local logfile="$2"
+  local timeout="$3"
+  
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 10
+    
+    # Check if log file was modified recently
+    if [[ -f "$logfile" ]]; then
+      local now last_mod age
+      now=$(date +%s)
+      if [[ "$(uname)" == "Darwin" ]]; then
+        last_mod=$(stat -f %m "$logfile")
+      else
+        last_mod=$(stat -c %Y "$logfile")
+      fi
+      age=$((now - last_mod))
+      
+      if [[ $age -gt $timeout ]]; then
+        echo "" >> "$logfile"
+        echo "=== WATCHDOG: No output for ${age}s (limit ${timeout}s) — killing process ===" >> "$logfile"
+        echo "⚠️  WATCHDOG: Thinking loop detected (${age}s silent). Killing Claude Code."
+        kill "$pid" 2>/dev/null || true
+        return 1
+      fi
+    fi
+  done
+  return 0
+}
+
+# Run claude under `script` for full PTY capture
+if [[ "$(uname)" == "Darwin" ]]; then
+  script -q "$LOG_FILE" claude "$PROMPT" &
+else
+  script -q -c "claude \"$PROMPT\"" "$LOG_FILE" &
+fi
+CLAUDE_PID=$!
+
+# Start watchdog in background
+watchdog "$CLAUDE_PID" "$LOG_FILE" "$THINKING_TIMEOUT" &
+WATCHDOG_PID=$!
+
+# Wait for claude to finish
+wait "$CLAUDE_PID" 2>/dev/null
+EXIT_CODE=$?
+
+# Clean up watchdog
+kill "$WATCHDOG_PID" 2>/dev/null || true
+wait "$WATCHDOG_PID" 2>/dev/null || true
 
 echo ""
-echo "📄 Full log saved to: ${LOG_FILE}"
+echo "=== Session ended: $(date -Iseconds) | exit: ${EXIT_CODE} ===" >> "$LOG_FILE"
+echo "📄 Full log: ${LOG_FILE}"
+
+if [[ $EXIT_CODE -ne 0 ]]; then
+  echo "⚠️  Claude Code exited with code ${EXIT_CODE}"
+fi
+
+exit $EXIT_CODE
